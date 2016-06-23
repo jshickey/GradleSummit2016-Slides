@@ -1,0 +1,302 @@
+//:revealjs_width:'100%'
+//:width: 100%
+//:revealjs_margin: 0.04
+//:revealjs_height: '100%'
+:revealjs_width: '100%'
+:imagesdir: images
+:sourcedir: snippets
+:revealjs_loop: false
+
+:data-background: images/Summit_Title_Slide-1024x768.png
+== &nbsp;
+
+:data-background:
+== Deep Dive Into Mutual of Omaha’s Custom Jenkins Pipeline DSL
+Tim Preston & Scott Hickey
+
+== About Us
+//[.text-left]
+[role="incremental text-left"]
+Tim Preston
+
+* Technical Lead for the CI Platform Team
+* tim.preston@mutualofomaha.com
+* @tpreston
+
+Scott Hickey
+
+* Mentor for teams adopting the CI Pipeline
+* scott.hickey@mutualfomaha.com
+* @jshickey
+
+[NOTE.speaker]
+--
+Scott has been using Jenkins and Gradle for 6 years, Groovy since 2005. This is my first time creating a Groovy DSL. This is also first time trying to link all of developer tools like Subversion, Jenkins, Artifactory, JIRA - together.
+--
+
+== Agenda
+* Overview of Project (Scott)
+* Custom Gradle Distribution (Tim)
+* Walk-thru of Build Pipeline DSL (Tim)
+* Successes and Challenges (Tim & Scott)
+
+== Overview of Project
+* Sample Pipeline in Jenkins
+* Example of the DSL that creates the pipeline
+* Screen shot Jenkins Job that creates the pipeline
+* Overview of the Environment
+* Jenkins Plugins in Use at Mutual of Omaha
+
+=== Sample Pipeline in Jenkins
+[data-background=images/PSS-Jenkins-Pipeline-Full-Screen.png]
+=== !
+
+=== Typical Pipeline
+[data-background=none]
+[source,groovy,linenums]
+----
+pipelineConfig {
+    asi = 'PSS'
+    projectName = 'PremiumSaverSystem'
+    buildPipelineRows = 10
+
+    createPipeline {
+        initJob()
+        buildAndUnitTestJob()
+        staticCodeAnalysisJob()
+        publishSnapshotJob()
+        promoteToReleaseCandidateJob()
+        promoteToReleaseJob()
+    }
+}
+----
+
+=== Customizing The Pipeline
+[data-background=none]
+[source,groovy,linenums]
+----
+pipelineConfig {
+    asi = 'esc'
+    projectName = 'MentorPracticeDocs'
+    buildPipelineRows = 10
+    notifiedUsers = ['req84082']
+
+    createPipeline {
+        initJob()
+        buildAndUnitTestJob([skipTests: true, gradleTasks: 'assemble'])
+        publishSnapshotJob([deployRepository: 'docs-snapshot-local'])
+        promoteToReleaseCandidateJob([deployRepository: 'docs-release-candidate-local'])
+        promoteToReleaseJob([deployRepository: 'docs-release-local'])
+    }
+}
+----
+
+=== Seeding the Pipeline
+[data-background=images/Jenkins-Home-Page.png]
+=== !
+[data-background=images/Create-Pipeline.png]
+=== !
+
+=== Our Environment
+* Subversion
+* Jenkins
+* SonarQube
+* Artifactory
+* Fisheye
+* Crucible
+* JIRA
+
+=== Integration
+* Subversion -> Jenkins, JIRA, Artifactory
+* Jenkins -> JIRA, Artifactory, SonarQube
+* Artifactory -> Jenkins, Subversion, JIRA
+* JIRA -> Jenkins
+* Crucible -> JIRA
+
+=== Subversion Integration With Jenkins
+[data-background=images/init-job-console-output.png]
+=== !
+[data-background=images/subversion-changes-in-jenkins.png]
+=== !
+[data-background=images/subversion-changes-in-fisheye.png]
+=== !
+[data-background=images/jenkins-console-for-sonar-job.png]
+=== !
+[data-background=images/sonar-pss-project-home-page.png]
+=== !
+[data-background=images/sonar-code-coverage.png]
+=== !
+[data-background=images/artifactory-build-browser.png]
+=== !
+[data-background=images/artifactory-published-artifacts.png]
+=== !
+[data-background=images/artifactory-build-environment.png]
+=== !
+[data-background=images/artifactory-rc-jira-issues.png]
+=== !
+[data-background=images/jira-issue.png]
+=== !
+[data-background=images/jira-code-review-popup.png]
+=== !
+[data-background=images/crucible-code-review.png]
+=== !
+
+== Mutual of Omaha's Custom Gradle Distribution
+
+=== CI Platform Team: Assembling the Distribution
+* Download Distribution from Gradle
+* Unzip & Add Custom Init Scripts
+* Repackage & Store in Artifactory
+
+=== Developers: Using the Distribution
+[source,groovy,linenums]
+.gradle-wrapper.properties
+----
+distributionUrl=https\://artifactory/tools-release-local/path/to/archive/mutual-gradle-2.13-r0.zip
+----
+
+=== Init Scripts
+. Artifactory
+. Check for Updates
+. Setup Dependencies
+. Migration
+. Lint
+
+== Walk-thru of Build Pipeline DSL
+
+=== Jenkins Conventions Plugin
+[data-background=none]
+[source,groovy,linenums]
+.build.gradle
+----
+apply plugin: 'com.mutualofomaha.jenkins-conventions'
+
+pipelineConfig {
+    asi = 'PSS'
+    projectName = 'PremiumSaverSystem'
+    buildPipelineRows = 10
+
+    createPipeline {
+        initJob()
+        buildAndUnitTestJob()
+        staticCodeAnalysisJob()
+        publishSnapshotJob()
+        promoteToReleaseCandidateJob()
+        promoteToReleaseJob()
+    }
+}
+----
+
+=== !
+[data-background=none]
+[source,groovy,linenums]
+.JenkinsConventions.groovy
+----
+class JenkinsConventions implements Plugin<Project> {
+    protected String pluginId() { "com.mutualofomaha.jenkins-conventions" }
+
+    public void apply(Project project) {
+        project.with {
+            plugins.apply('com.terrafolio.jenkins') // Apply the Gradle Jenkins Plugin
+
+            extensions.create("pipelineConfig", PipelineConfigurationExtension, project)
+
+            tasks.create(name: "jenkinsSanityCheck", type: JenkinsSanityCheckTask, group: "Jenkins Management")
+            tasks.updateJenkinsItems.dependsOn tasks.jenkinsSanityCheck
+        }
+    }
+}
+----
+
+=== Pipeline Configuration Extension
+
+=== Creating the Build Pipeline
+[source,groovy,linenums]
+.PipelineConfigurationExtension.groovy
+----
+void createPipeline(String pipelineName = "", Closure closure) {
+    // Omitted: Checking for a few required fields...
+
+    // Omitted: Set the name of the Build Pipeline folder...
+
+    createFolder()
+    createBuildPipelineView()
+    closure()
+}
+----
+
+=== Creation of the Init Job
+[source,groovy,linenums]
+.PipelineConfigurationExtension.groovy
+----
+void initJob(Map options = [:], Closure closure = {}) {
+    loadOptions(options)
+    options.put('step', Step.INIT)
+
+    def job = createBaseJenkinsJob(jenkins, Step.INIT.jobName, options)
+    def jobBuilder = new InitJobBuilder(project, options)
+    jobBuilder.build(job)
+
+    applyDsl job, closure
+}
+----
+
+=== Creation of the Build Job
+[source,groovy,linenums]
+.PipelineConfigurationExtension.groovy
+----
+void buildAndUnitTestJob(Map options = [:], Closure closure = {}) {
+    JenkinsJob previousJob = jobsList.last()
+
+    loadOptions(options)
+    options.put('step', Step.BUILD)
+
+    def job = createBaseJenkinsJob(jenkins, Step.BUILD.jobName, options)
+    def jobBuilder = new BuildJobBuilder(project, options)
+    jobBuilder.build(job)
+
+    configureUpstreamJob(previousJob, job)
+
+    applyDsl job, closure
+}
+----
+
+=== Builders for each Job Type
+
+=== Base Job Builder
+* Sets up base configuration for all jobs
+** JDK
+** Days to keep logs
+** Email notifications
+** JIRA Integration
+
+=== Init Job Builder
+* Configures SVN
+* Sets up polling (@yearly)
+* Executes the updateJenkinsItems Gradle task
+
+=== Build Job builder
+* Executes the test & cloverGenerateReport Gradle tasks
+* Sets up JUnit Report Publishing
+* Updates JIRA
+* Sets up Clover Report Publishing
+
+=== !
+image::dsl-reference.png[DSL Reference, 1024, 768]
+
+== Successes and Challenges
+
+=== Switching Tools on the Fly
+
+JaCoCo -> Atlassian Clover
+
+JDK 7 -> JDK 8
+
+=== Adoption
+image::cip-adoption.png[Adoption, 800, 600]
+
+== Questions
+
+:data-background: images/Summit_Final_Slide-1024x768.png
+== !
+//&nbsp;
